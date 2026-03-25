@@ -1,0 +1,17 @@
+<?php
+include 'db.php';
+
+// Cambia la línea del correo por esta:
+$correo = mysqli_real_escape_string($conexion, $_POST['email']);
+$dominio = substr(strrchr($correo, "@"), 1);
+$query = mysqli_query($conexion, "SELECT * FROM usuarios WHERE email='$correo'");
+if (!checkdnsrr($dominio, "MX")) {
+    echo "inventado"; // El dominio no existe o no puede recibir correos
+    exit();
+}
+if(mysqli_num_rows($query) > 0){
+    echo "existe";
+} else {
+    echo "disponible";
+}
+?>

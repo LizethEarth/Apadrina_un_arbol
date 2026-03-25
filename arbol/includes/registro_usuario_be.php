@@ -1,0 +1,112 @@
+<?php
+// Archivo: includes/registro_usuario_be.php
+include 'db.php';
+include 'config.php';
+
+// Clases de PHPMailer
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
+require '../phpmailer/Exception.php';
+require '../phpmailer/PHPMailer.php';
+require '../phpmailer/SMTP.php';
+
+// Sanitización de entradas
+$nombre = mysqli_real_escape_string($conexion, $_POST['nombre_usuario']);
+$correo = mysqli_real_escape_string($conexion, $_POST['email']);
+$pass   = $_POST['user-password'];
+$pass_c = $_POST['reg_confirm'];
+
+// 1. Validar nombre reservado 
+if (strtolower($nombre) == 'admin') {
+    header("Location: ../pages/registro.php?error=nombre_reservado");
+    exit();
+}
+
+// 2. Validar que las contraseñas coincidan
+if ($pass !== $pass_c) {
+    header("Location: ../pages/registro.php?error=pass_no_coinciden");
+    exit();
+}
+
+// Validar fuerza de contraseña
+if (strlen($pass) < 8 || !preg_match('/[0-9]/', $pass) || !preg_match('/[^A-Za-z0-9]/', $pass)) {
+    header("Location: ../pages/registro.php?error=pass_debil");
+    exit();
+}
+
+// --- VERIFICACIÓN DE DUPLICADOS ---
+
+// Verificar que el correo no se repita
+$verificar_correo = mysqli_query($conexion, "SELECT * FROM usuarios WHERE email='$correo'");
+
+if(mysqli_num_rows($verificar_correo) > 0){
+    header("Location: ../pages/registro.php?error=usuario_duplicado");
+    exit(); 
+}
+
+// Verificar que el nombre de usuario no se repita
+$verificar_usuario = mysqli_query($conexion, "SELECT * FROM usuarios WHERE nombre_usuario='$nombre'");
+
+if(mysqli_num_rows($verificar_usuario) > 0){
+    header("Location: ../pages/registro.php?error=usuario_duplicado");
+    exit();
+}
+
+// -----------------------------------------------------------
+
+// Encriptación de contraseñas
+$pass_encriptada = password_hash($pass, PASSWORD_BCRYPT);
+
+// 4. Generación de Token de verificación
+$token = bin2hex(random_bytes(16)); 
+
+// 5. Preparar inserción (id_rol 3 = Usuario Registrado)
+$id_rol_default = 3;
+$query = "INSERT INTO usuarios (nombre_usuario, email, password, token, verificado, id_rol) 
+          VALUES ('$nombre', '$correo', '$pass_encriptada', '$token', 0, $id_rol_default)";
+
+$ejecutar = mysqli_query($conexion, $query);
+
+if ($ejecutar) {
+    $mail = new PHPMailer(true);
+
+    try {
+        $mail->isSMTP();
+        $mail->Host       = 'smtp.gmail.com';
+        $mail->SMTPAuth   = true;
+        $mail->Username   = SMTP_USER; 
+        $mail->Password   = SMTP_PASS; 
+        $mail->SMTPSecure = 'tls';
+        $mail->Port = 587;
+
+        $mail->setFrom(SMTP_USER, 'Apadrina un Árbol');
+        $mail->addAddress($correo, $nombre);
+
+        $mail->isHTML(true);
+        $mail->Subject = 'Verifica tu cuenta - Apadrina un Arbol';
+        
+        $enlace = "http://apadrinaunarbol.free.nf/includes/verificar_correos_existentes.php?email=$correo&token=$token";
+
+        $mail->Body = "
+            <div style='font-family: sans-serif; border: 1px solid #ddd; padding: 20px;'>
+                <h2>¡Hola $nombre!</h2>
+                <p>Gracias por registrarte en el proyecto de la UTSC. Para asegurar que este correo es real, por favor confirma tu cuenta haciendo clic en el siguiente botón:</p>
+                <a href='$enlace' style='background-color: #5D8736; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;'>Verificar mi cuenta</a>
+                <p>Si no puedes ver el botón, copia y pega este enlace en tu navegador: <br> $enlace </p>
+            </div>
+        ";
+
+        $mail->send();
+        header("Location: ../pages/login.php?status=check_email");
+
+    } catch (Exception $e) {
+        header("Location: ../pages/registro.php?error=error_envio_correo");
+    }
+
+} else {
+    header("Location: ../pages/registro.php?error=error_db");
+}
+
+mysqli_close($conexion);
+?>
